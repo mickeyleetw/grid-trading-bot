@@ -1,0 +1,26 @@
+# OKX API Configuration
+# WARNING: Never commit your real API credentials!
+# Copy this file to config.yaml and update with your credentials:
+# cp configs/config.example.yaml configs/config.yaml
+okx:
+  api_key: "your-api-key-here"
+  secret_key: "your-secret-key-here"
+  passphrase: "your-passphrase-here"
+  testnet: true  # Use testnet for development
+
+# Grid Trading Configuration
+grid:
+  upper_bound: 3100.0    # Upper price boundary
+  lower_bound: 2900.0    # Lower price boundary
+  grid_count: 10         # Number of grids
+  order_size: 0.01       # Fixed order size (ETH)
+
+# Risk Management Configuration
+risk:
+  stop_loss_ratio: 0.8   # Stop loss at 80% of initial equity
+  exposure_time: 3       # Exposure time limit in seconds
+
+# Logging Configuration
+log:
+  level: "info"          # debug, info, warn, error
+  output: "logs/bot.log" # Log file path
