@@ -1,1 +1,42 @@
 .claude/
+
+# Binaries
+grid-trading-bot
+grid-trading-bot-*
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Logs
+*.log
+logs/
+
+# Config files (sensitive data)
+configs/*.yaml
+!configs/config.example.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
