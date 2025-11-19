@@ -1,50 +1,20 @@
 # Grid Trading Bot
 
-Automated grid trading bot for OKX ETHUSDT perpetual futures.
-
-## Features
-
-- Automated grid trading with neutral strategy
-- Real-time market monitoring via Websocket
-- Built-in risk management (stop-loss & exposure control)
-- Terminal-based interface
-- Emergency exit functionality
-
-## Prerequisites
-
-- Go 1.21+
-- OKX account with API credentials
-- golangci-lint (for development)
-
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/mickeyleetw/grid-trading-bot.git
-cd grid-trading-bot
-
-# Install dependencies
-go mod download
-
-# Install development tools
-make install-tools
+go mod tidy
 ```
 
 ## Configuration
 
 1. Copy the example config:
-```bash
-cp configs/config.example.yaml configs/config.yaml
-```
 
-2. Edit `configs/config.yaml` with your OKX API credentials:
-```yaml
-okx:
-  api_key: "your-api-key"
-  secret_key: "your-secret-key"
-  passphrase: "your-passphrase"
-  testnet: true  # Set to false for production
-```
+  ```bash
+  cp configs/config.example.yaml configs/config.yaml
+  ```
+
+2. Edit `configs/config.yaml` to your customized version
 
 ## Usage
 
