@@ -24,3 +24,19 @@ risk:
 log:
   level: "info"          # debug, info, warn, error
   output: "logs/bot.log" # Log file path
+
+# HTTP Server Configuration
+server:
+  enabled: true                    # Enable HTTP API server
+  port: 8080                       # Server port
+  api_token: "your-api-token-here" # API authentication token
+  # Optional: IP whitelist for security (comma-separated)
+  # allowed_ips: "127.0.0.1,192.168.1.0/24"
+
+# Telegram Notification Configuration
+telegram:
+  enabled: true                           # Enable Telegram notifications
+  bot_token: "your-telegram-bot-token"    # Telegram Bot API token
+  chat_id: "your-telegram-chat-id"        # Chat ID to receive notifications
+  # Get bot token from @BotFather
+  # Get chat ID by messaging @userinfobot
