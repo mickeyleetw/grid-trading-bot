@@ -41,4 +41,5 @@ configs/*.yaml
 .DS_Store
 Thumbs.db
 
+build/
 configs/config.yaml
