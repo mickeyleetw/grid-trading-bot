@@ -5,6 +5,6 @@ import (
 )
 
 func main() {
-	server := &ui.WebServer{}
+	server := &ui.HttpServer{}
 	server.Start()
 }

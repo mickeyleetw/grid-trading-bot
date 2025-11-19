@@ -6,12 +6,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type WebServer struct {
+type HttpServer struct {
 	router *gin.Engine
 }
 
-func (w *WebServer) Start() {
+func (w *HttpServer) Start() {
 	w.router = gin.Default()
+	w.router.SetTrustedProxies(nil)
 
 	w.router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -19,5 +20,5 @@ func (w *WebServer) Start() {
 		})
 	})
 
-	w.router.Run()
+	w.router.Run(":8888")
 }
