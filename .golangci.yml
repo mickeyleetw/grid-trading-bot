@@ -1,0 +1,67 @@
+# golangci-lint configuration
+# Documentation: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m       # Maximum execution time
+  tests: true       # Also check test files
+  skip-dirs:
+    - vendor        # Third-party packages
+    - build         # Build output directory
+
+linters:
+  enable:
+    # Must-have (Critical)
+    - errcheck       # Check for unhandled errors
+    - govet          # Run go vet checks
+    - staticcheck    # Advanced static analysis
+
+    # Code Quality (Highly Recommended)
+    - gosimple       # Suggest code simplifications
+    - unused         # Check for unused constants, variables, and functions
+    - ineffassign    # Check for ineffective assignments
+    - gofmt          # Check code formatting
+    - goimports      # Check import order and grouping
+
+    # Security (Important for production)
+    - gosec          # Security checks (SQL injection, hardcoded passwords, etc.)
+
+    # Error Handling
+    - errorlint      # Check for error handling issues (errors.Is, errors.As)
+
+    # Performance
+    - bodyclose      # Check for unclosed HTTP response bodies
+    - prealloc       # Check for slice preallocation opportunities
+
+    # Code Style
+    - revive         # Fast, configurable linter (like golint)
+    - misspell       # Check for spelling mistakes
+
+    # Complexity & Duplication
+    - gocyclo        # Check cyclomatic complexity
+    - goconst        # Check for repeated strings that should be constants
+    - dupl           # Check for code duplication
+
+linters-settings:
+  errcheck:
+    check-blank: true  # Check for _ = someFunc() patterns
+
+  govet:
+    check-shadowing: true  # Check for variable shadowing
+
+  gofmt:
+    simplify: true  # Suggest simpler syntax
+
+  gocyclo:
+    min-complexity: 15  # Warn if function complexity > 15
+
+  dupl:
+    threshold: 100  # Warn if code duplication > 100 tokens
+
+  goconst:
+    min-len: 3  # Minimum string length to check
+    min-occurrences: 3  # Minimum occurrences before suggesting constant
+
+issues:
+  exclude-use-default: false  # Don't use default exclude rules (show all issues)
+  max-issues-per-linter: 0    # No limit on issues per linter
+  max-same-issues: 0          # No limit on same issues
