@@ -1,8 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"github.com/mickeyleetw/grid-trading-bot/ui"
+)
 
 func main() {
-	fmt.Println("Grid Trading Bot - Starting...")
-	// TODO: Initialize application
+	server := &ui.HttpServer{}
+	server.Start()
 }
