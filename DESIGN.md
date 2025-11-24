@@ -37,7 +37,7 @@
 | 語言 | Go | 1.23+ | 主要開發語言 |
 | HTTP 框架 | Gin | v1.11.0 | REST API Server |
 | WebSocket | gorilla/websocket | v1.5.3 | OKX WebSocket 客戶端 |
-| 配置解析 | go-yaml | v1.18.0 | YAML 配置檔讀取 |
+| 配置解析 | viper | v1.19.0 | 配置檔讀取與管理 |
 | 日誌 | zap | v1.27.1 | 結構化日誌 |
 | 通知 | telegram-bot-api | v5.5.1 | Telegram 訊息推送 |
 
@@ -94,7 +94,7 @@ graph LR
 ```
 internal/config/
 ├── config.go    # 配置結構定義
-└── loader.go    # YAML 讀取與驗證
+└── loader.go    # 配置讀取與驗證
 ```
 
 #### 核心結構
