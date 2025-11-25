@@ -8,12 +8,19 @@ go mod tidy
 
 ## Configuration
 
-Edit `configs/config.yaml` with your settings:
+1. Copy the example configuration file:
+   ```bash
+   cp configs/config.example.yaml configs/config.yaml
+   ```
 
-- `app.environment`: Environment mode (`production` / `testing` / `development`)
-- `okx.*`: OKX API credentials and settings
-- `telegram.*`: Telegram bot configuration
-- `server.*`: HTTP server settings
+2. Edit `configs/config.yaml` with your settings:
+
+   - `app.environment`: Environment mode (`production` / `testing` / `development`)
+   - `okx.*`: OKX API credentials and settings
+   - `telegram.*`: Telegram bot configuration
+   - `server.*`: HTTP server settings
+
+**Note:** `config.yaml` contains sensitive information and is excluded from version control.
 
 ## Usage
 
