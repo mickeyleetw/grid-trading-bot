@@ -1,6 +1,10 @@
 package logger
 
-import "go.uber.org/zap"
+import (
+	"fmt"
+
+	"go.uber.org/zap"
+)
 
 func New(env string) (*zap.Logger, error) {
 	switch env {
@@ -11,6 +15,6 @@ func New(env string) (*zap.Logger, error) {
 	case "development":
 		return zap.NewDevelopment()
 	default:
-		return zap.NewDevelopment()
+		return nil, fmt.Errorf("invalid environment: %s (must be one of: production, testing, development)", env)
 	}
 }

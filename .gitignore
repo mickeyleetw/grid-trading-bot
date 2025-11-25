@@ -27,8 +27,8 @@ go.work
 logs/
 
 # Config files (sensitive data)
-configs/*.yaml
-!configs/config.yaml
+configs/config.yaml
+!configs/config.example.yaml
 
 # IDE
 .vscode/
