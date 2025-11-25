@@ -1,18 +1,25 @@
+// Package ui provides HTTP server functionality for the Grid Trading Bot.
 package ui
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-type HttpServer struct {
+// HTTPServer represents the HTTP server for the bot.
+type HTTPServer struct {
 	router *gin.Engine
 }
 
-func (w *HttpServer) Start() {
+// Start initializes and starts the HTTP server on the specified port.
+func (w *HTTPServer) Start(port int) error {
 	w.router = gin.Default()
-	w.router.SetTrustedProxies(nil)
+
+	// SetTrustedProxies with nil means trust no proxies, error is unlikely
+	//nolint:errcheck // nil input cannot fail
+	_ = w.router.SetTrustedProxies(nil)
 
 	w.router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -20,5 +27,12 @@ func (w *HttpServer) Start() {
 		})
 	})
 
-	w.router.Run(":8888")
+	// Run starts the server and blocks until error occurs
+	// Common errors: port already in use, permission denied
+	addr := fmt.Sprintf(":%d", port)
+	if err := w.router.Run(addr); err != nil {
+		return err
+	}
+
+	return nil
 }

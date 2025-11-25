@@ -1,11 +1,20 @@
-strategy:
-order_executor:
-  okx:
-    api_key: "your-api-key-here"
-    secret_key: "your-secret-key-here"
-    passphrase: "your-passphrase-here"
-    is_testnet: true
-notifier:
-  telegram:
-    token: "your-telegram-token-here"
-    chat_id: "your-telegram-chat-id-here"
+# Grid Trading Bot Configuration Example
+# Copy this file to config.yaml and fill in your actual values
+
+okx:
+  apikey: "your-okx-api-key"
+  secretkey: "your-okx-secret-key"
+  passphrase: "your-okx-passphrase"
+  testnet: true  # Use OKX testnet (true) or production (false)
+
+telegram:
+  enabled: true  # Enable/disable Telegram notifications
+  token: "your-telegram-bot-token"
+  chatid: 123456789  # Your Telegram chat ID
+
+server:
+  port: 8080  # HTTP server port
+  apitoken: "your-api-token-for-authentication"  # Token for API authentication
+
+# Note: Grid and risk parameters are passed via API when starting the bot
+# They are NOT stored in this config file
