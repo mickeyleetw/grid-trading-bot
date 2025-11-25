@@ -28,7 +28,7 @@ logs/
 
 # Config files (sensitive data)
 configs/*.yaml
-!configs/config.example.yaml
+!configs/config.yaml
 
 # IDE
 .vscode/
@@ -42,4 +42,3 @@ configs/*.yaml
 Thumbs.db
 
 build/
-configs/config.yaml

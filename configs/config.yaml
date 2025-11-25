@@ -1,6 +1,9 @@
 # Grid Trading Bot Configuration Example
 # Copy this file to config.yaml and fill in your actual values
 
+app:
+  environment: development  # Options: production, testing, development
+
 okx:
   apikey: "your-okx-api-key"
   secretkey: "your-okx-secret-key"
