@@ -5,6 +5,7 @@ import (
 
 	"grid-trading-bot/internal/config"
 	"grid-trading-bot/internal/logger"
+	"grid-trading-bot/ui"
 
 	"go.uber.org/zap"
 )
@@ -36,5 +37,11 @@ func main() {
 		zap.Bool("telegramEnabled", cfg.Telegram.Enabled))
 
 	zapLogger.Info("Grid Trading Bot initialized successfully")
-	zapLogger.Info("Ready to start trading (implementation pending)")
+
+	// Initialize HTTP server
+	server := &ui.HTTPServer{}
+	zapLogger.Info("Starting HTTP server", zap.Int("port", cfg.Server.Port))
+	if err := server.Start(cfg.Server.Port); err != nil {
+		zapLogger.Fatal("Failed to start HTTP server", zap.Error(err))
+	}
 }
