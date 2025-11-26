@@ -29,6 +29,30 @@ go build -o build/bot cmd/bot/main.go
 ./build/bot
 ```
 
+## Project Structure
+
+```
+grid-trading-bot/
+├── cmd/
+│   └── bot/              # Main application entry point
+├── internal/
+│   ├── config/           # Configuration management
+│   ├── logger/           # Logging utilities
+│   └── okx/              # OKX REST API client
+├── configs/              # Configuration files
+└── ui/                   # HTTP server and handlers
+```
+
+### Key Components
+
+- **OKX Client** (`internal/okx/`): REST API client for OKX exchange
+  - API authentication (HMAC-SHA256)
+  - Account queries (balance, positions)
+  - Order operations (place, cancel, query)
+  - Market data (ticker prices)
+  - Built-in caching mechanism
+  - Error handling and retry logic
+
 ## Development
 
 ### Code Quality Checks
