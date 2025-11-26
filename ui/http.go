@@ -1,18 +1,19 @@
 package ui
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-type HttpServer struct {
+type HTTPServer struct {
 	router *gin.Engine
 }
 
-func (w *HttpServer) Start() {
+func (w *HTTPServer) Start(port int) error {
 	w.router = gin.Default()
-	w.router.SetTrustedProxies(nil)
+	_ = w.router.SetTrustedProxies(nil)
 
 	w.router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -20,5 +21,10 @@ func (w *HttpServer) Start() {
 		})
 	})
 
-	w.router.Run(":8888")
+	addr := fmt.Sprintf(":%d", port)
+	if err := w.router.Run(addr); err != nil {
+		return err
+	}
+
+	return nil
 }

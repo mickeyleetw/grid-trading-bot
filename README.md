@@ -8,13 +8,19 @@ go mod tidy
 
 ## Configuration
 
-1. Copy the example config:
+1. Copy the example configuration file:
+   ```bash
+   cp configs/config.example.yaml configs/config.yaml
+   ```
 
-  ```bash
-  cp configs/config.example.yaml configs/config.yaml
-  ```
+2. Edit `configs/config.yaml` with your settings:
 
-2. Edit `configs/config.yaml` to your customized version
+   - `app.environment`: Environment mode (`production` / `testing` / `development`)
+   - `okx.*`: OKX API credentials and settings
+   - `telegram.*`: Telegram bot configuration
+   - `server.*`: HTTP server settings
+
+**Note:** `config.yaml` contains sensitive information and is excluded from version control.
 
 ## Usage
 
