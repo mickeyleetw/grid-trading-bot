@@ -2,82 +2,73 @@ package okx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"time"
 
 	"go.uber.org/zap"
 )
 
-func (c *Client) doRequest(method, path, body string) ([]byte, error) {
-	var lastErr error
+const (
+	baseURL = "https://www.okx.com"
+)
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			c.logger.Debug("Retrying API request",
-				zap.Int("attempt", attempt),
-				zap.String("path", path))
-			time.Sleep(retryDelay)
-		}
-
-		url := c.baseURL + path
-		req, err := http.NewRequest(method, url, bytes.NewBufferString(body))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		headers := c.addAuthHeaders(method, path, body, nil)
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to execute request: %w", err)
-			continue
-		}
-
-		respBody, err := io.ReadAll(resp.Body)
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			c.logger.Warn("Failed to close response body", zap.Error(closeErr))
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("server error: status=%d, body=%s", resp.StatusCode, string(respBody))
-			continue
-		}
-
-		if resp.StatusCode >= 400 {
-			c.logger.Error("API request failed",
-				zap.Int("status", resp.StatusCode),
-				zap.String("path", path),
-				zap.String("body", string(respBody)))
-			return nil, fmt.Errorf("HTTP error: status=%d, body=%s", resp.StatusCode, string(respBody))
-		}
-
-		c.logger.Debug("API request succeeded",
-			zap.String("path", path),
-			zap.Int("status", resp.StatusCode))
-
-		return respBody, nil
+func (c *Client) doRequest(ctx context.Context, method, path, body string) ([]byte, error) {
+	url := baseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBufferString(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+	headers := c.addAuthHeaders(method, path, body, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		c.logger.Error("API request failed",
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", resp.StatusCode),
+			zap.String("response", string(respBody)))
+
+		if resp.StatusCode == 429 {
+			return nil, fmt.Errorf("rate limited (HTTP 429)")
+		}
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("server error (HTTP %d)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("client error (HTTP %d)", resp.StatusCode)
+	}
+
+	c.logger.Debug("API request succeeded",
+		zap.String("method", method),
+		zap.String("path", path),
+		zap.Int("status", resp.StatusCode))
+
+	return respBody, nil
 }
 
-func (c *Client) GetBalance(currency string) (*Balance, error) {
+func (c *Client) GetBalance(ctx context.Context, currency string) (*Balance, error) {
 	path := "/api/v5/account/balance"
 	if currency != "" {
 		path += "?ccy=" + currency
 	}
 
-	respBody, err := c.doRequest("GET", path, "")
+	respBody, err := c.doRequest(ctx, "GET", path, "")
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +95,13 @@ func (c *Client) GetBalance(currency string) (*Balance, error) {
 	return nil, fmt.Errorf("balance not found for currency %s", currency)
 }
 
-func (c *Client) GetPositions(instID string) ([]Position, error) {
+func (c *Client) GetPositions(ctx context.Context, instID string) ([]Position, error) {
 	path := "/api/v5/account/positions"
 	if instID != "" {
 		path += "?instId=" + instID
 	}
 
-	respBody, err := c.doRequest("GET", path, "")
+	respBody, err := c.doRequest(ctx, "GET", path, "")
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +118,7 @@ func (c *Client) GetPositions(instID string) ([]Position, error) {
 	return posResp.Data, nil
 }
 
-func (c *Client) PlaceOrder(req *OrderRequest) (string, error) {
+func (c *Client) PlaceOrder(ctx context.Context, req *OrderRequest) (string, error) {
 	path := "/api/v5/trade/order"
 
 	body, err := json.Marshal(req)
@@ -135,7 +126,7 @@ func (c *Client) PlaceOrder(req *OrderRequest) (string, error) {
 		return "", fmt.Errorf("failed to serialize order request: %w", err)
 	}
 
-	respBody, err := c.doRequest("POST", path, string(body))
+	respBody, err := c.doRequest(ctx, "POST", path, string(body))
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +156,7 @@ func (c *Client) PlaceOrder(req *OrderRequest) (string, error) {
 	return orderResp.Data[0].OrderID, nil
 }
 
-func (c *Client) CancelOrder(instID, orderID string) error {
+func (c *Client) CancelOrder(ctx context.Context, instID, orderID string) error {
 	path := "/api/v5/trade/cancel-order"
 
 	req := CancelOrderRequest{
@@ -178,7 +169,7 @@ func (c *Client) CancelOrder(instID, orderID string) error {
 		return fmt.Errorf("failed to serialize cancel order request: %w", err)
 	}
 
-	respBody, err := c.doRequest("POST", path, string(body))
+	respBody, err := c.doRequest(ctx, "POST", path, string(body))
 	if err != nil {
 		return err
 	}
@@ -207,7 +198,7 @@ func (c *Client) CancelOrder(instID, orderID string) error {
 	return nil
 }
 
-func (c *Client) CancelBatchOrders(orders []CancelOrderRequest) error {
+func (c *Client) CancelBatchOrders(ctx context.Context, orders []CancelOrderRequest) error {
 	path := "/api/v5/trade/cancel-batch-orders"
 
 	body, err := json.Marshal(orders)
@@ -215,7 +206,7 @@ func (c *Client) CancelBatchOrders(orders []CancelOrderRequest) error {
 		return fmt.Errorf("failed to serialize batch cancel order request: %w", err)
 	}
 
-	respBody, err := c.doRequest("POST", path, string(body))
+	respBody, err := c.doRequest(ctx, "POST", path, string(body))
 	if err != nil {
 		return err
 	}
@@ -235,13 +226,13 @@ func (c *Client) CancelBatchOrders(orders []CancelOrderRequest) error {
 	return nil
 }
 
-func (c *Client) GetPendingOrders(instID string) ([]Order, error) {
+func (c *Client) GetPendingOrders(ctx context.Context, instID string) ([]Order, error) {
 	path := "/api/v5/trade/orders-pending"
 	if instID != "" {
 		path += "?instId=" + instID
 	}
 
-	respBody, err := c.doRequest("GET", path, "")
+	respBody, err := c.doRequest(ctx, "GET", path, "")
 	if err != nil {
 		return nil, err
 	}
@@ -258,128 +249,27 @@ func (c *Client) GetPendingOrders(instID string) ([]Order, error) {
 	return orderResp.Data, nil
 }
 
-func (c *Client) GetFills(instID string, limit int) ([]Fill, error) {
-	path := "/api/v5/trade/fills?instType=SWAP"
-	if instID != "" {
-		path += "&instId=" + instID
-	}
-	if limit > 0 {
-		path += "&limit=" + strconv.Itoa(limit)
-	}
-
-	respBody, err := c.doRequest("GET", path, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var fillResp FillResponse
-	if err := json.Unmarshal(respBody, &fillResp); err != nil {
-		return nil, fmt.Errorf("failed to parse fill history response: %w", err)
-	}
-
-	if err := c.validateAPIResponse(fillResp.Code, fillResp.Msg); err != nil {
-		return nil, err
-	}
-
-	return fillResp.Data, nil
-}
-
-func (c *Client) GetTicker(instID string) (*Ticker, error) {
-	if time.Since(c.cache.lastPriceTime) < priceCacheDuration && c.cache.lastPrice > 0 {
-		c.logger.Debug("Using cached price",
-			zap.Float64("price", c.cache.lastPrice),
-			zap.Duration("age", time.Since(c.cache.lastPriceTime)))
-		return &Ticker{
-			InstID: instID,
-			Last:   fmt.Sprintf("%.8f", c.cache.lastPrice),
-		}, nil
-	}
-
+func (c *Client) GetTicker(ctx context.Context, instID string) (*Ticker, error) {
 	path := "/api/v5/market/ticker?instId=" + instID
 
-	respBody, err := c.doRequest("GET", path, "")
+	respBody, err := c.doRequest(ctx, "GET", path, "")
 	if err != nil {
 		return nil, err
 	}
 
 	var tickerResp TickerResponse
-	if parseErr := json.Unmarshal(respBody, &tickerResp); parseErr != nil {
-		return nil, fmt.Errorf("failed to parse ticker response: %w", parseErr)
+	if err := json.Unmarshal(respBody, &tickerResp); err != nil {
+		return nil, fmt.Errorf("failed to parse ticker response: %w", err)
 	}
 
-	if validateErr := c.validateAPIResponse(tickerResp.Code, tickerResp.Msg); validateErr != nil {
-		return nil, validateErr
+	if err := c.validateAPIResponse(tickerResp.Code, tickerResp.Msg); err != nil {
+		return nil, err
 	}
 
 	if len(tickerResp.Data) == 0 {
 		return nil, fmt.Errorf("no ticker data")
 	}
 
-	price, priceErr := strconv.ParseFloat(tickerResp.Data[0].Last, 64)
-	if priceErr == nil {
-		c.cache.lastPrice = price
-		c.cache.lastPriceTime = time.Now()
-		c.logger.Debug("Updated price cache",
-			zap.Float64("price", price))
-	}
-
 	return &tickerResp.Data[0], nil
 }
 
-func (c *Client) UpdateAccountCache(instID string) error {
-	if time.Since(c.cache.accountUpdated) < accountCacheDuration {
-		return nil
-	}
-
-	balance, err := c.GetBalance("USDT")
-	if err != nil {
-		return fmt.Errorf("failed to query balance: %w", err)
-	}
-
-	balanceFloat, err := strconv.ParseFloat(balance.Available, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse balance: %w", err)
-	}
-	c.cache.balance = balanceFloat
-
-	positions, err := c.GetPositions(instID)
-	if err != nil {
-		return fmt.Errorf("failed to query positions: %w", err)
-	}
-
-	if len(positions) > 0 {
-		pos, err := strconv.ParseFloat(positions[0].Position, 64)
-		if err == nil {
-			c.cache.position = pos
-		}
-
-		upl, err := strconv.ParseFloat(positions[0].UnrealizedPnL, 64)
-		if err == nil {
-			c.cache.unrealizedPnL = upl
-		}
-	} else {
-		c.cache.position = 0
-		c.cache.unrealizedPnL = 0
-	}
-
-	c.cache.accountUpdated = time.Now()
-
-	c.logger.Debug("Updated account cache",
-		zap.Float64("balance", c.cache.balance),
-		zap.Float64("position", c.cache.position),
-		zap.Float64("unrealizedPnL", c.cache.unrealizedPnL))
-
-	return nil
-}
-
-func (c *Client) GetCachedBalance() float64 {
-	return c.cache.balance
-}
-
-func (c *Client) GetCachedPosition() float64 {
-	return c.cache.position
-}
-
-func (c *Client) GetCachedUnrealizedPnL() float64 {
-	return c.cache.unrealizedPnL
-}

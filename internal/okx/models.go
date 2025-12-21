@@ -1,13 +1,5 @@
 package okx
 
-import "time"
-
-type APIResponse struct {
-	Code string        `json:"code"`
-	Msg  string        `json:"msg"`
-	Data []interface{} `json:"data"`
-}
-
 type Balance struct {
 	Currency  string `json:"ccy"`
 	Balance   string `json:"bal"`
@@ -98,24 +90,6 @@ type OrderListResponse struct {
 	Data []Order `json:"data"`
 }
 
-type Fill struct {
-	InstID      string `json:"instId"`
-	OrderID     string `json:"ordId"`
-	TradeID     string `json:"tradeId"`
-	Side        string `json:"side"`
-	FillSize    string `json:"fillSz"`
-	FillPrice   string `json:"fillPx"`
-	Fee         string `json:"fee"`
-	FeeCurrency string `json:"feeCcy"`
-	Timestamp   string `json:"ts"`
-}
-
-type FillResponse struct {
-	Code string `json:"code"`
-	Msg  string `json:"msg"`
-	Data []Fill `json:"data"`
-}
-
 type Ticker struct {
 	InstID    string `json:"instId"`
 	Last      string `json:"last"`
@@ -131,13 +105,4 @@ type TickerResponse struct {
 	Code string   `json:"code"`
 	Msg  string   `json:"msg"`
 	Data []Ticker `json:"data"`
-}
-
-type cache struct {
-	lastPrice      float64
-	lastPriceTime  time.Time
-	balance        float64
-	position       float64
-	unrealizedPnL  float64
-	accountUpdated time.Time
 }

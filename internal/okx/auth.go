@@ -34,6 +34,10 @@ func (c *Client) addAuthHeaders(method, requestPath, body string, headers map[st
 	headers["OK-ACCESS-PASSPHRASE"] = c.passphrase
 	headers["Content-Type"] = "application/json"
 
+	if c.simulated {
+		headers["x-simulated-trading"] = "1"
+	}
+
 	return headers
 }
 

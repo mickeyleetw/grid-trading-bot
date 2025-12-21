@@ -7,38 +7,21 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	productionBaseURL = "https://www.okx.com"
-	testnetBaseURL    = "https://www.okx.com"
-
-	priceCacheDuration   = 5 * time.Second
-	accountCacheDuration = 10 * time.Second
-
-	maxRetries = 1
-	retryDelay = 500 * time.Millisecond
-)
-
 type Client struct {
 	apiKey     string
 	secretKey  string
 	passphrase string
-	baseURL    string
+	simulated  bool // if true, uses simulated trading environment (x-simulated-trading: 1)
 	httpClient *http.Client
 	logger     *zap.Logger
-	cache      cache
 }
 
-func NewClient(apiKey, secretKey, passphrase string, testNet bool, logger *zap.Logger) *Client {
-	baseURL := productionBaseURL
-	if testNet {
-		baseURL = testnetBaseURL
-	}
-
+func NewClient(apiKey, secretKey, passphrase string, simulated bool, logger *zap.Logger) *Client {
 	return &Client{
 		apiKey:     apiKey,
 		secretKey:  secretKey,
 		passphrase: passphrase,
-		baseURL:    baseURL,
+		simulated:  simulated,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -46,10 +29,3 @@ func NewClient(apiKey, secretKey, passphrase string, testNet bool, logger *zap.L
 	}
 }
 
-func (c *Client) GetAPIKey() string {
-	return c.apiKey
-}
-
-func (c *Client) GetBaseURL() string {
-	return c.baseURL
-}
