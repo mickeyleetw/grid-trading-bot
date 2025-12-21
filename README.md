@@ -50,8 +50,8 @@ grid-trading-bot/
   - Account queries (balance, positions)
   - Order operations (place, cancel, query)
   - Market data (ticker prices)
-  - Built-in caching mechanism
-  - Error handling and retry logic
+  - Context support for request cancellation
+  - Simulated trading mode support
 
 ## Development
 
