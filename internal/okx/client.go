@@ -28,4 +28,3 @@ func NewClient(apiKey, secretKey, passphrase string, simulated bool, logger *zap
 		logger: logger,
 	}
 }
-
