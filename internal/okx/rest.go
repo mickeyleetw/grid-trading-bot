@@ -272,4 +272,3 @@ func (c *Client) GetTicker(ctx context.Context, instID string) (*Ticker, error) 
 
 	return &tickerResp.Data[0], nil
 }
-
