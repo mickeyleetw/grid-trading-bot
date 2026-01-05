@@ -3,7 +3,6 @@ package okx
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -21,30 +20,13 @@ const (
 	wsDemoPublicURL  = "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999"
 	wsDemoPrivateURL = "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999"
 
-	// Ping interval (OKX recommends < 30s)
-	pingInterval = 25 * time.Second
-
-	// Read timeout - if no message received within this time, consider disconnected
-	readTimeout = 60 * time.Second
-
-	// Handshake timeout for WebSocket connection
-	handshakeTimeout = 10 * time.Second
-
-	// Maximum reconnection attempts
-	maxReconnectAttempts = 3
-
-	// Initial reconnection delay
-	initialReconnectDelay = 1 * time.Second
-
 	// Channel type constants
 	channelPublic  = "public"
 	channelPrivate = "private"
-)
 
-// wsDialer is a custom dialer with timeout settings
-var wsDialer = websocket.Dialer{
-	HandshakeTimeout: handshakeTimeout,
-}
+	// Authentication timeout
+	authTimeout = 10 * time.Second
+)
 
 // WSConfig holds WebSocket client configuration
 type WSConfig struct {
@@ -54,19 +36,18 @@ type WSConfig struct {
 	Simulated  bool // if true, uses demo trading environment
 }
 
-// WebSocketClient manages WebSocket connections to OKX
+// WebSocketClient manages WebSocket connections to OKX.
+// It handles OKX-specific logic: authentication, subscriptions, and message parsing.
+// Connection management is delegated to WSTransport.
 type WebSocketClient struct {
 	config *WSConfig
 	logger *zap.Logger
 
-	publicConn  *websocket.Conn
-	privateConn *websocket.Conn
+	publicTransport  *WSTransport
+	privateTransport *WSTransport
 
-	// Connection state
-	publicConnected  bool
-	privateConnected bool
-	authenticated    bool
-	stopped          bool // Tracks if Disconnect() has been called
+	// OKX specific state
+	authenticated bool
 
 	// Subscriptions to restore on reconnect
 	publicSubscriptions  []WSSubscribeArg
@@ -78,16 +59,12 @@ type WebSocketClient struct {
 	onConnected    func(channelType string)
 	onDisconnected func(channelType string, err error)
 
-	// Control channels
-	stopChan    chan struct{}
-	publicDone  chan struct{}
-	privateDone chan struct{}
-
-	// Reconnection tracking
-	publicReconnectCount  int
-	privateReconnectCount int
-
 	mu sync.RWMutex
+}
+
+// okxPing sends OKX-specific ping message (plain text "ping")
+func okxPing(conn *websocket.Conn) error {
+	return conn.WriteMessage(websocket.TextMessage, []byte("ping"))
 }
 
 // NewWebSocketClient creates a new WebSocket client
@@ -97,7 +74,6 @@ func NewWebSocketClient(config *WSConfig, logger *zap.Logger) *WebSocketClient {
 		logger:               logger,
 		publicSubscriptions:  make([]WSSubscribeArg, 0),
 		privateSubscriptions: make([]WSSubscribeArg, 0),
-		stopChan:             make(chan struct{}),
 	}
 }
 
@@ -132,135 +108,153 @@ func (ws *WebSocketClient) SetDisconnectedHandler(handler func(channelType strin
 // ConnectPublic establishes connection to public WebSocket channel
 func (ws *WebSocketClient) ConnectPublic(ctx context.Context) error {
 	ws.mu.Lock()
-	if ws.publicConnected {
+	if ws.publicTransport != nil && ws.publicTransport.IsConnected() {
 		ws.mu.Unlock()
 		return nil
 	}
-	ws.mu.Unlock()
 
 	url := wsPublicURL
 	if ws.config.Simulated {
 		url = wsDemoPublicURL
 	}
 
-	ws.logger.Info("Connecting to public WebSocket", zap.String("url", url))
+	config := DefaultTransportConfig(url)
+	config.CustomPing = okxPing
 
-	conn, resp, err := wsDialer.DialContext(ctx, url, nil)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+	transport := NewWSTransport(config, ws.logger)
+	transport.OnMessage = func(msg []byte) {
+		ws.handleMessage(channelPublic, msg)
 	}
-	if err != nil {
-		ws.logger.Error("Failed to connect to public WebSocket", zap.Error(err))
-		return fmt.Errorf("failed to connect to public WebSocket: %w", err)
+	transport.OnConnected = func() {
+		ws.mu.RLock()
+		handler := ws.onConnected
+		ws.mu.RUnlock()
+		if handler != nil {
+			handler(channelPublic)
+		}
+		ws.restoreSubscriptions(channelPublic)
+	}
+	transport.OnDisconnected = func(err error) {
+		ws.mu.RLock()
+		handler := ws.onDisconnected
+		ws.mu.RUnlock()
+		if handler != nil {
+			handler(channelPublic, err)
+		}
 	}
 
-	ws.mu.Lock()
-	ws.publicConn = conn
-	ws.publicConnected = true
-	ws.publicReconnectCount = 0
-	ws.publicDone = make(chan struct{})
+	ws.publicTransport = transport
 	ws.mu.Unlock()
 
-	ws.logger.Info("Public WebSocket connected")
-
-	// Start message reader and heartbeat
-	go ws.readPump(channelPublic, conn, ws.publicDone)
-	go ws.heartbeat(channelPublic, conn, ws.publicDone)
-
-	// Notify connection established
-	ws.mu.RLock()
-	handler := ws.onConnected
-	ws.mu.RUnlock()
-	if handler != nil {
-		handler(channelPublic)
-	}
-
-	// Restore subscriptions
-	ws.restoreSubscriptions(channelPublic)
-
-	return nil
+	return transport.Connect(ctx)
 }
 
 // ConnectPrivate establishes connection to private WebSocket channel with authentication
 func (ws *WebSocketClient) ConnectPrivate(ctx context.Context) error {
 	ws.mu.Lock()
-	if ws.privateConnected {
+	if ws.privateTransport != nil && ws.privateTransport.IsConnected() {
 		ws.mu.Unlock()
 		return nil
 	}
-	ws.mu.Unlock()
 
 	url := wsPrivateURL
 	if ws.config.Simulated {
 		url = wsDemoPrivateURL
 	}
 
-	ws.logger.Info("Connecting to private WebSocket", zap.String("url", url))
+	config := DefaultTransportConfig(url)
+	config.CustomPing = okxPing
 
-	conn, resp, err := wsDialer.DialContext(ctx, url, nil)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+	transport := NewWSTransport(config, ws.logger)
+
+	// Set up callbacks before connecting
+	transport.OnMessage = func(msg []byte) {
+		ws.handleMessage(channelPrivate, msg)
 	}
-	if err != nil {
-		ws.logger.Error("Failed to connect to private WebSocket", zap.Error(err))
-		return fmt.Errorf("failed to connect to private WebSocket: %w", err)
+	transport.OnConnected = func() {
+		ws.mu.RLock()
+		handler := ws.onConnected
+		ws.mu.RUnlock()
+		if handler != nil {
+			handler(channelPrivate)
+		}
+		ws.restoreSubscriptions(channelPrivate)
+	}
+	transport.OnDisconnected = func(err error) {
+		ws.mu.Lock()
+		ws.authenticated = false
+		ws.mu.Unlock()
+
+		ws.mu.RLock()
+		handler := ws.onDisconnected
+		ws.mu.RUnlock()
+		if handler != nil {
+			handler(channelPrivate, err)
+		}
+	}
+	// OnBeforePump handles re-authentication after reconnect
+	transport.OnBeforePump = func() error {
+		ws.logger.Info("Re-authenticating after reconnect...")
+		if err := ws.authenticate(); err != nil {
+			ws.logger.Error("Re-authentication failed", zap.Error(err))
+			return err
+		}
+		ws.mu.Lock()
+		ws.authenticated = true
+		ws.mu.Unlock()
+		ws.logger.Info("Re-authentication successful")
+		return nil
 	}
 
+	ws.privateTransport = transport
+	ws.mu.Unlock()
+
+	// Connect without starting pump (so we can authenticate first)
+	if err := transport.ConnectOnly(ctx); err != nil {
+		return err
+	}
+
+	// Authenticate synchronously before starting pump
 	ws.logger.Info("Private WebSocket connected, authenticating...")
-
-	// Authenticate BEFORE setting connected state to avoid resource leak
-	if err := ws.authenticate(conn); err != nil {
-		_ = conn.Close() // Close connection directly without closeConnection()
+	if err := ws.authenticate(); err != nil {
+		transport.Disconnect()
 		ws.logger.Error("Private WebSocket authentication failed", zap.Error(err))
 		return fmt.Errorf("failed to authenticate: %w", err)
 	}
 
-	// Only set state after successful authentication
 	ws.mu.Lock()
-	ws.privateConn = conn
-	ws.privateConnected = true
 	ws.authenticated = true
-	ws.privateReconnectCount = 0
-	ws.privateDone = make(chan struct{})
 	ws.mu.Unlock()
 
 	ws.logger.Info("Private WebSocket authenticated")
 
-	// Start message reader and heartbeat
-	go ws.readPump(channelPrivate, conn, ws.privateDone)
-	go ws.heartbeat(channelPrivate, conn, ws.privateDone)
-
-	// Notify connection established
-	ws.mu.RLock()
-	handler := ws.onConnected
-	ws.mu.RUnlock()
-	if handler != nil {
-		handler(channelPrivate)
-	}
-
-	// Restore subscriptions
-	ws.restoreSubscriptions(channelPrivate)
+	// Now start the pump - this will trigger OnConnected callback
+	transport.StartPump()
 
 	return nil
 }
 
 // authenticate sends login request to private channel
-func (ws *WebSocketClient) authenticate(conn *websocket.Conn) error {
+func (ws *WebSocketClient) authenticate() error {
+	ws.mu.RLock()
+	transport := ws.privateTransport
+	ws.mu.RUnlock()
+
+	if transport == nil {
+		return ErrNotConnected
+	}
+
 	loginReq := buildLoginRequest(ws.config.APIKey, ws.config.SecretKey, ws.config.Passphrase)
 
-	if err := conn.WriteJSON(loginReq); err != nil {
+	if err := transport.SendJSON(loginReq); err != nil {
 		return fmt.Errorf("failed to send login request: %w", err)
 	}
 
-	// Wait for login response
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		return fmt.Errorf("failed to set read deadline: %w", err)
-	}
-	_, message, err := conn.ReadMessage()
+	// Wait for login response using ReadOnce (before pump is started)
+	message, err := transport.ReadOnce(authTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to read login response: %w", err)
 	}
-	_ = conn.SetReadDeadline(time.Time{}) // Clear deadline
 
 	var resp WSLoginResponse
 	if err := json.Unmarshal(message, &resp); err != nil {
@@ -275,7 +269,6 @@ func (ws *WebSocketClient) authenticate(conn *websocket.Conn) error {
 }
 
 // hasSubscription checks if a subscription already exists.
-// IMPORTANT: Caller must hold at least RLock before calling this function.
 func (ws *WebSocketClient) hasSubscription(subs []WSSubscribeArg, channel, instID string) bool {
 	for _, sub := range subs {
 		if sub.Channel == channel && sub.InstID == instID {
@@ -286,19 +279,14 @@ func (ws *WebSocketClient) hasSubscription(subs []WSSubscribeArg, channel, instI
 }
 
 // SubscribeTicker subscribes to ticker channel for the given instrument.
-// If the connection is not established, returns an error. Subscriptions are
-// automatically restored after reconnection via restoreSubscriptions().
-// TODO: Consider waiting for server confirmation before storing subscription
-// to handle cases where the server rejects the subscription request.
 func (ws *WebSocketClient) SubscribeTicker(instID string) error {
 	ws.mu.RLock()
-	conn := ws.publicConn
-	connected := ws.publicConnected
+	transport := ws.publicTransport
 	alreadySubscribed := ws.hasSubscription(ws.publicSubscriptions, "tickers", instID)
 	ws.mu.RUnlock()
 
-	if !connected || conn == nil {
-		return errors.New("public WebSocket not connected")
+	if transport == nil || !transport.IsConnected() {
+		return ErrNotConnected
 	}
 
 	if alreadySubscribed {
@@ -307,11 +295,10 @@ func (ws *WebSocketClient) SubscribeTicker(instID string) error {
 	}
 
 	req := buildSubscribeRequest("tickers", instID)
-	if err := conn.WriteJSON(req); err != nil {
+	if err := transport.SendJSON(req); err != nil {
 		return fmt.Errorf("failed to subscribe to ticker: %w", err)
 	}
 
-	// Store subscription for reconnect (avoid duplicates)
 	ws.mu.Lock()
 	ws.publicSubscriptions = append(ws.publicSubscriptions, WSSubscribeArg{
 		Channel: "tickers",
@@ -324,23 +311,18 @@ func (ws *WebSocketClient) SubscribeTicker(instID string) error {
 }
 
 // SubscribeOrders subscribes to orders channel for the given instrument.
-// Requires private channel to be connected and authenticated.
-// Subscriptions are automatically restored after reconnection via restoreSubscriptions().
-// TODO: Consider waiting for server confirmation before storing subscription
-// to handle cases where the server rejects the subscription request.
 func (ws *WebSocketClient) SubscribeOrders(instID string) error {
 	ws.mu.RLock()
-	conn := ws.privateConn
-	connected := ws.privateConnected
+	transport := ws.privateTransport
 	authenticated := ws.authenticated
 	alreadySubscribed := ws.hasSubscription(ws.privateSubscriptions, "orders", instID)
 	ws.mu.RUnlock()
 
-	if !connected || conn == nil {
-		return errors.New("private WebSocket not connected")
+	if transport == nil || !transport.IsConnected() {
+		return ErrNotConnected
 	}
 	if !authenticated {
-		return errors.New("private WebSocket not authenticated")
+		return fmt.Errorf("private WebSocket not authenticated")
 	}
 
 	if alreadySubscribed {
@@ -359,11 +341,10 @@ func (ws *WebSocketClient) SubscribeOrders(instID string) error {
 		Args: []any{arg},
 	}
 
-	if err := conn.WriteJSON(req); err != nil {
+	if err := transport.SendJSON(req); err != nil {
 		return fmt.Errorf("failed to subscribe to orders: %w", err)
 	}
 
-	// Store subscription for reconnect (avoid duplicates)
 	ws.mu.Lock()
 	ws.privateSubscriptions = append(ws.privateSubscriptions, arg)
 	ws.mu.Unlock()
@@ -376,22 +357,26 @@ func (ws *WebSocketClient) SubscribeOrders(instID string) error {
 func (ws *WebSocketClient) restoreSubscriptions(channelType string) {
 	ws.mu.RLock()
 	var subs []WSSubscribeArg
-	var conn *websocket.Conn
+	var transport *WSTransport
 	if channelType == channelPublic {
 		subs = ws.publicSubscriptions
-		conn = ws.publicConn
+		transport = ws.publicTransport
 	} else {
 		subs = ws.privateSubscriptions
-		conn = ws.privateConn
+		transport = ws.privateTransport
 	}
 	ws.mu.RUnlock()
+
+	if transport == nil {
+		return
+	}
 
 	for _, sub := range subs {
 		req := &WSRequest{
 			Op:   WSOpSubscribe,
 			Args: []any{sub},
 		}
-		if err := conn.WriteJSON(req); err != nil {
+		if err := transport.SendJSON(req); err != nil {
 			ws.logger.Error("Failed to restore subscription",
 				zap.String("channel", sub.Channel),
 				zap.String("instId", sub.InstID),
@@ -401,43 +386,6 @@ func (ws *WebSocketClient) restoreSubscriptions(channelType string) {
 				zap.String("channel", sub.Channel),
 				zap.String("instId", sub.InstID))
 		}
-	}
-}
-
-// readPump continuously reads messages from WebSocket.
-// Note: The select with default ensures we check stop signals before each read.
-// ReadMessage() will block for up to readTimeout (60s) before timing out,
-// so there may be a delay of up to 60s before responding to stop signals.
-func (ws *WebSocketClient) readPump(channelType string, conn *websocket.Conn, done chan struct{}) {
-	defer func() {
-		ws.handleDisconnect(channelType, nil)
-	}()
-
-	for {
-		// Check stop signals before blocking on read
-		select {
-		case <-done:
-			return
-		case <-ws.stopChan:
-			return
-		default:
-		}
-
-		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-				ws.logger.Info("WebSocket closed normally", zap.String("channel", channelType))
-				return
-			}
-			ws.logger.Error("WebSocket read error",
-				zap.String("channel", channelType),
-				zap.Error(err))
-			ws.handleDisconnect(channelType, err)
-			return
-		}
-
-		ws.handleMessage(channelType, message)
 	}
 }
 
@@ -500,7 +448,6 @@ type channelPreview struct {
 
 // handleDataMessage processes data push messages
 func (ws *WebSocketClient) handleDataMessage(channelType string, message []byte) {
-	// First, peek at the channel type to avoid unnecessary parsing
 	var preview channelPreview
 	if err := json.Unmarshal(message, &preview); err != nil {
 		ws.logger.Debug("Failed to preview message channel", zap.Error(err))
@@ -549,174 +496,22 @@ func (ws *WebSocketClient) handleDataMessage(channelType string, message []byte)
 	}
 }
 
-// heartbeat sends periodic ping messages to keep connection alive
-func (ws *WebSocketClient) heartbeat(channelType string, conn *websocket.Conn, done chan struct{}) {
-	ticker := time.NewTicker(pingInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ws.stopChan:
-			return
-		case <-ticker.C:
-			if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
-				ws.logger.Error("Failed to send ping",
-					zap.String("channel", channelType),
-					zap.Error(err))
-				return
-			}
-			ws.logger.Debug("Sent ping", zap.String("channel", channelType))
-		}
-	}
-}
-
-// handleDisconnect handles disconnection and triggers reconnection
-func (ws *WebSocketClient) handleDisconnect(channelType string, err error) {
-	ws.mu.Lock()
-	var wasConnected bool
-	if channelType == channelPublic {
-		wasConnected = ws.publicConnected
-		ws.publicConnected = false
-	} else {
-		wasConnected = ws.privateConnected
-		ws.privateConnected = false
-		ws.authenticated = false
-	}
-	ws.mu.Unlock()
-
-	if !wasConnected {
-		return
-	}
-
-	ws.logger.Warn("WebSocket disconnected",
-		zap.String("channel", channelType),
-		zap.Error(err))
-
-	// Notify disconnection
-	ws.mu.RLock()
-	handler := ws.onDisconnected
-	ws.mu.RUnlock()
-	if handler != nil {
-		handler(channelType, err)
-	}
-
-	// Attempt reconnection
-	go ws.reconnect(channelType)
-}
-
-// reconnect attempts to reconnect with exponential backoff
-func (ws *WebSocketClient) reconnect(channelType string) {
-	ws.mu.Lock()
-	var reconnectCount *int
-	if channelType == channelPublic {
-		reconnectCount = &ws.publicReconnectCount
-	} else {
-		reconnectCount = &ws.privateReconnectCount
-	}
-	*reconnectCount++
-	count := *reconnectCount
-	ws.mu.Unlock()
-
-	if count > maxReconnectAttempts {
-		ws.logger.Error("Max reconnection attempts reached, giving up",
-			zap.String("channel", channelType),
-			zap.Int("attempts", count),
-			zap.Int("maxAttempts", maxReconnectAttempts))
-		return
-	}
-
-	// Exponential backoff: 1s, 2s, 4s
-	delay := initialReconnectDelay * time.Duration(1<<(count-1))
-	ws.logger.Info("Attempting reconnection",
-		zap.String("channel", channelType),
-		zap.Int("attempt", count),
-		zap.Int("maxAttempts", maxReconnectAttempts),
-		zap.Duration("delay", delay))
-
-	select {
-	case <-time.After(delay):
-	case <-ws.stopChan:
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var err error
-	if channelType == channelPublic {
-		err = ws.ConnectPublic(ctx)
-	} else {
-		err = ws.ConnectPrivate(ctx)
-	}
-
-	if err != nil {
-		ws.logger.Error("Reconnection failed",
-			zap.String("channel", channelType),
-			zap.Int("attempt", count),
-			zap.Error(err))
-		// Try again
-		ws.handleDisconnect(channelType, err)
-	}
-}
-
-// closeConnection closes a WebSocket connection safely (prevents double close)
-func (ws *WebSocketClient) closeConnection(channelType string, conn *websocket.Conn) {
-	if conn == nil {
-		return
-	}
-
-	_ = conn.WriteMessage(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	_ = conn.Close()
-
-	ws.mu.Lock()
-	defer ws.mu.Unlock()
-
-	if channelType == channelPublic {
-		ws.publicConnected = false
-		ws.publicConn = nil
-		if ws.publicDone != nil {
-			close(ws.publicDone)
-			ws.publicDone = nil // Prevent double close
-		}
-	} else {
-		ws.privateConnected = false
-		ws.privateConn = nil
-		ws.authenticated = false
-		if ws.privateDone != nil {
-			close(ws.privateDone)
-			ws.privateDone = nil // Prevent double close
-		}
-	}
-}
-
-// Disconnect closes all WebSocket connections safely
+// Disconnect closes all WebSocket connections
 func (ws *WebSocketClient) Disconnect() {
-	ws.mu.Lock()
-	if ws.stopped {
-		ws.mu.Unlock()
-		return // Already disconnected
-	}
-	ws.stopped = true
-
-	// Close stopChan safely
-	select {
-	case <-ws.stopChan:
-		// Already closed
-	default:
-		close(ws.stopChan)
-	}
-
-	publicConn := ws.publicConn
-	privateConn := ws.privateConn
-	ws.mu.Unlock()
-
 	ws.logger.Info("Disconnecting WebSocket client")
 
-	ws.closeConnection(channelPublic, publicConn)
-	ws.closeConnection(channelPrivate, privateConn)
+	ws.mu.Lock()
+	publicTransport := ws.publicTransport
+	privateTransport := ws.privateTransport
+	ws.authenticated = false
+	ws.mu.Unlock()
+
+	if publicTransport != nil {
+		publicTransport.Disconnect()
+	}
+	if privateTransport != nil {
+		privateTransport.Disconnect()
+	}
 
 	ws.logger.Info("WebSocket client disconnected")
 }
@@ -725,14 +520,14 @@ func (ws *WebSocketClient) Disconnect() {
 func (ws *WebSocketClient) IsPublicConnected() bool {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
-	return ws.publicConnected
+	return ws.publicTransport != nil && ws.publicTransport.IsConnected()
 }
 
 // IsPrivateConnected returns true if private channel is connected
 func (ws *WebSocketClient) IsPrivateConnected() bool {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
-	return ws.privateConnected
+	return ws.privateTransport != nil && ws.privateTransport.IsConnected()
 }
 
 // IsAuthenticated returns true if private channel is authenticated
